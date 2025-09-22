@@ -50,15 +50,15 @@ BLEService fitnessMachineService("1826"); // FTMS
 
 // Service characteristics exposed by FTMS
 BLECharacteristic fitnessMachineFeatureCharacteristic("2ACC", BLERead, 8);                                  // Fitness Machine Feature, mandatory, read
-BLECharacteristic indoorBikeDataCharacteristic("2AD2", BLENotify, 8);                                       // Indoor Bike Data, optional, notify
+BLECharacteristic indoorBikeDataCharacteristic("2AD2", BLENotify, /*sizof(ibdBuffer)*/9);                                       // Indoor Bike Data, optional, notify
 BLECharacteristic trainingStatusCharacteristic("2AD3", BLENotify | BLERead, 20);                            // Training Status, optional, read & notify
 BLECharacteristic supportedResistanceLevelRangeCharacteristic("2AD6", BLERead, 4);                          // Supported Resistance Level, read, optional
 BLECharacteristic fitnessMachineControlPointCharacteristic("2AD9", BLEWrite | BLEIndicate, FMCP_DATA_SIZE); // Fitness Machine Control Point, optional, write & indicate
 BLECharacteristic fitnessMachineStatusCharacteristic("2ADA", BLENotify, 2);                                 // Fitness Machine Status, mandatory, notify
 
 // Buffers used to write to the characteristics and initial values
-unsigned char ftmfBuffer[4] = { 0b10000111, 0b01000000, 0, 0 }; //, 0, 0, 0, 0};                            // Features: 0 (Avg speed), 1 (Cadence), 2 (Total distance), 7 (Resistance level), 10 (Heart rate measurement), 14 (Power measurement)
-unsigned char ibdBuffer[8]  = { 0, 0, 0, 0, 0, 0, 0, 0};
+unsigned char ftmfBuffer[4] = { 0b10000111, 0b01000100, 0, 0 }; //, 0, 0, 0, 0};                            // Features: 0 (Avg speed), 1 (Cadence), 2 (Total distance), 7 (Resistance level), 10 (Heart rate measurement), 14 (Power measurement)
+unsigned char ibdBuffer[9]  = { 0, 0, 0, 0, 0, 0, 0, 0, 0};
 unsigned char srlrBuffer[4] = { 0, 200, 0, 1};                                                              // Supported Resistance Level Range
 unsigned char ftmsBuffer[2] = { 0, 0};
 unsigned char tsBuffer[2]   = { 0x0, 0x0};                                                                  // Training status: flags: 0 (no string present); Status: 0x00 = Other
@@ -160,6 +160,7 @@ unsigned long cadence_timer_ibd = 0;        // The previous time written to ibd
 unsigned long cadence_timer_csc = 0;        // The previous time written to csc
 unsigned int instantaneous_cadence = 0;     // Global variable to hold the calculated cadence
 double instantaneous_power = 0;               // Global variable to hold the calculated power
+uint8_t HeartRate = 90;
 
 /**
  * PWM Signal
@@ -261,7 +262,7 @@ void setup() {
 
   // Write values to the characteristics that can be read
   fitnessMachineFeatureCharacteristic.writeValue(ftmfBuffer, 4);
-  indoorBikeDataCharacteristic.writeValue(ibdBuffer, 8);
+  indoorBikeDataCharacteristic.writeValue(ibdBuffer, sizeof(ibdBuffer));
   supportedResistanceLevelRangeCharacteristic.writeValue(srlrBuffer, 4);
   fitnessMachineStatusCharacteristic.writeValue(ftmsBuffer, 2);
   trainingStatusCharacteristic.writeValue(tsBuffer, 2);
@@ -318,6 +319,8 @@ void loop() {
     speed_counter += 100;
     speed_timer = millis();
 
+    HeartRate = fake_duration / 10;
+
     fake_duration += increase;
     if (fake_duration >= 1100)
       increase = -50;
@@ -339,6 +342,8 @@ void loop() {
         Serial.println(instantaneous_cadence);
         Serial.print("PWM: ");
         Serial.println(currentPwm);
+        Serial.print("HeartRate: ");
+        Serial.println(HeartRate);        
       }
           
       writeIndoorBikeDataCharacteristic();
@@ -443,7 +448,7 @@ void generatePwmSignal() {
  */
 void writeIndoorBikeDataCharacteristic() {
   ibdBuffer[0] = 0x00 | flagInstantaneousCadence | flagIntantaneousPower; // More Data = 0 (instantaneous speed present), bit 2: instantaneous cadence present
-  ibdBuffer[1] = 0;
+  ibdBuffer[1] = 0 | (flagHeartRate >> 8);
 
   instantaneous_speed = calculate_speed(speed_counter, speed_counter_ibd, speed_timer, speed_timer_ibd);
   // double sp = calculate_speed(speed_counter, speed_counter_ibd, speed_timer, speed_timer_ibd);
@@ -466,7 +471,12 @@ void writeIndoorBikeDataCharacteristic() {
   ibdBuffer[6] = (int)round(instantaneous_power) & 0xFF; // Instantaneous Power, uint16
   ibdBuffer[7] = ((int)round(instantaneous_power) >> 8) & 0xFF;
   
-  indoorBikeDataCharacteristic.writeValue(ibdBuffer, 8);
+  ibdBuffer[8] = HeartRate;
+
+  // peter https://devzone.nordicsemi.com/f/nordic-q-a/56157/ble--nrfconnect-ftms-profile-indoor-bike-data-characteristic
+  // https://developer.huawei.com/consumer/en/doc/HMSCore-Guides/ftms-0000001058954130
+
+  indoorBikeDataCharacteristic.writeValue(ibdBuffer, sizeof(ibdBuffer));
 
   // IBD was written, so update the values
   speed_counter_ibd = speed_counter;
