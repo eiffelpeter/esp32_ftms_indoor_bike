@@ -11,7 +11,7 @@
 this demo generate fake data. check define `FAKE_DATA`.  
 
 ## Demo on kinomap
-![IMAGE ALT TEXT HERE](./img/IMG_3926.jpg)  
+![IMAGE ALT TEXT HERE](./img/IMG_9003.jpg)  
 
 ## Reference
 [link](https://github.com/krisc-informatica/arduino-smart-bike-trainer.git)  
