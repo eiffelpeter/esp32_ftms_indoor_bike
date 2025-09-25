@@ -1,5 +1,6 @@
 #include <ArduinoBLE.h>
 #include <math.h>
+#include "esp_mac.h"// For esp_read_mac
 
 #define FAKE_DATA 1
 
@@ -14,8 +15,8 @@ boolean write_startup_message = true;
 double BRAKE_SIZE = 23.35; // Distance between two brake speed pulses in mm.
 double WHEEL_SIZE = 2100; // Circumference of the wheel, to be defined by the rider, in mm.
 
-#define DEVICE_NAME_LONG "Arduino Smart Bike Trainer"
-#define DEVICE_NAME_SHORT "ASBT"
+//#define DEVICE_NAME_LONG "Arduino Smart Bike Trainer"
+//#define DEVICE_NAME_SHORT "ASBT"
 
 /** 
  * The Fitness Machine Control Point data type structure 
@@ -42,6 +43,14 @@ short fmcpValueLength;
 volatile long lastControlPointEvent = 0;
 long previousControlPointEvent = 0;
 
+// Buffers used to write to the characteristics and initial values
+unsigned char ftmfBuffer[4] = { 0b10000111, 0b01000100, 0, 0 }; //, 0, 0, 0, 0};                            // Features: 0 (Avg speed), 1 (Cadence), 2 (Total distance), 7 (Resistance level), 10 (Heart rate measurement), 14 (Power measurement)
+unsigned char ibdBuffer[9]  = { 0, 0, 0, 0, 0, 0, 0, 0, 0};
+unsigned char srlrBuffer[4] = { 0, 200, 0, 1};                                                              // Supported Resistance Level Range
+unsigned char ftmsBuffer[2] = { 0, 0};
+unsigned char tsBuffer[2]   = { 0x0, 0x0};                                                                  // Training status: flags: 0 (no string present); Status: 0x00 = Other
+unsigned char ftmcpBuffer[20];
+
 /**
  * Fitness Machine Service, uuid 0x1826 or 00001826-0000-1000-8000-00805F9B34FB
  * 
@@ -50,19 +59,11 @@ BLEService fitnessMachineService("1826"); // FTMS
 
 // Service characteristics exposed by FTMS
 BLECharacteristic fitnessMachineFeatureCharacteristic("2ACC", BLERead, 8);                                  // Fitness Machine Feature, mandatory, read
-BLECharacteristic indoorBikeDataCharacteristic("2AD2", BLENotify, /*sizof(ibdBuffer)*/9);                                       // Indoor Bike Data, optional, notify
+BLECharacteristic indoorBikeDataCharacteristic("2AD2", BLENotify, sizeof(ibdBuffer));                        // Indoor Bike Data, optional, notify
 BLECharacteristic trainingStatusCharacteristic("2AD3", BLENotify | BLERead, 20);                            // Training Status, optional, read & notify
 BLECharacteristic supportedResistanceLevelRangeCharacteristic("2AD6", BLERead, 4);                          // Supported Resistance Level, read, optional
 BLECharacteristic fitnessMachineControlPointCharacteristic("2AD9", BLEWrite | BLEIndicate, FMCP_DATA_SIZE); // Fitness Machine Control Point, optional, write & indicate
 BLECharacteristic fitnessMachineStatusCharacteristic("2ADA", BLENotify, 2);                                 // Fitness Machine Status, mandatory, notify
-
-// Buffers used to write to the characteristics and initial values
-unsigned char ftmfBuffer[4] = { 0b10000111, 0b01000100, 0, 0 }; //, 0, 0, 0, 0};                            // Features: 0 (Avg speed), 1 (Cadence), 2 (Total distance), 7 (Resistance level), 10 (Heart rate measurement), 14 (Power measurement)
-unsigned char ibdBuffer[9]  = { 0, 0, 0, 0, 0, 0, 0, 0, 0};
-unsigned char srlrBuffer[4] = { 0, 200, 0, 1};                                                              // Supported Resistance Level Range
-unsigned char ftmsBuffer[2] = { 0, 0};
-unsigned char tsBuffer[2]   = { 0x0, 0x0};                                                                  // Training status: flags: 0 (no string present); Status: 0x00 = Other
-unsigned char ftmcpBuffer[20];
 
 /**
  * Training session
@@ -212,10 +213,6 @@ void setup() {
   if (serial_debug) {
     Serial.begin(115200);
     while (!Serial);
-    Serial.print(DEVICE_NAME_LONG);
-    Serial.print(" (");
-    Serial.print(DEVICE_NAME_SHORT);
-    Serial.println(")");
   }
   // randomSeed(analogRead(0)); // For testing purposes of speed and cadence
 
@@ -247,8 +244,15 @@ void setup() {
     }
   }
 
-  BLE.setDeviceName(DEVICE_NAME_LONG);
-  BLE.setLocalName(DEVICE_NAME_SHORT);
+  uint8_t mac[6];
+  esp_read_mac(mac, ESP_MAC_BT); // Read the Bluetooth MAC address
+
+  char deviceName[30];
+  sprintf(deviceName, "FTMS_%02X%02X%02X%02X%02X%02X",mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+  BLE.setDeviceName(deviceName);
+  //BLE.setDeviceName(DEVICE_NAME_LONG);
+  //BLE.setLocalName(DEVICE_NAME_SHORT);
   BLE.setAdvertisedService(fitnessMachineService);
   // add the characteristic to the service
   fitnessMachineService.addCharacteristic(fitnessMachineFeatureCharacteristic);
@@ -319,7 +323,7 @@ void loop() {
     speed_counter += 100;
     speed_timer = millis();
 
-    HeartRate = fake_duration / 10;
+    HeartRate = 90 + (fake_duration / 50);
 
     fake_duration += increase;
     if (fake_duration >= 1100)
@@ -535,7 +539,13 @@ void writeFitnessMachineStatus() {
  */
 void handleControlPoint() {
   if (serial_debug) {
+    // https://developer.huawei.com/consumer/en/doc/HMSCore-Guides/fmcp-0000001050147089
+    const char* opcode_string[9] = { "Request Control", "Reset", "Set target speed", "Set target inclination", "Set Target Resistance Level", "Set Target Power", " ", "Start or resume", "Stop or pause" };
+
     Serial.println("Control point received");
+
+    Serial.printf("%s \n", opcode_string[fmcpData.values.OPCODE]);
+
     Serial.print("OpCode: ");
     Serial.println(fmcpData.values.OPCODE, HEX);
     Serial.print("Values: ");
