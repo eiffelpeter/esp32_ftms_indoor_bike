@@ -131,7 +131,7 @@ BLEDevice central;
  */
 #define RED 22     
 #define GREEN 23
-#define BLUE 24     
+#define BLUE 2  // for doit evb
 int ble_connected = LOW;
 const short NOTIFICATION_INTERVAL = 1000;
 long previous_notification = 0;
@@ -139,7 +139,7 @@ long previous_notification = 0;
 /**
  * Speed and Cadence sensor pins
  */
-#define SPEED   2
+#define SPEED   0
 #define CADENCE 3
 #define PWM     4
 #define SYNC    12
@@ -199,9 +199,13 @@ long current_millis;
  * @return void
  */
 void writeStatus(int red, int green, int blue) {
+#if CONFIG_IDF_TARGET_ESP32S3
+  rgbLedWrite(RGB_BUILTIN, red ? RGB_BRIGHTNESS : 0, green ? RGB_BRIGHTNESS : 0, blue ? RGB_BRIGHTNESS : 0);
+#else
   analogWrite(RED, red);
   analogWrite(GREEN, green);
   analogWrite(BLUE, blue);
+#endif
 }
 
 /**
@@ -221,7 +225,7 @@ void setup() {
   pinMode(BLUE, OUTPUT);
   writeStatus(1024, 1024, 0);
 
-  pinMode(SYNC, INPUT);
+  pinMode(SYNC, INPUT_PULLUP);
   pinMode(PWM, OUTPUT);
   pwmSignalStarted = false;
   currentPwm = 5;
@@ -284,8 +288,8 @@ void setup() {
   BLE.setEventHandler(BLEDisconnected, blePeripheralDisconnectHandler);
 
   // Speed and Cadence handling
-  pinMode(SPEED, INPUT);
-  pinMode(CADENCE, INPUT);
+  pinMode(SPEED, INPUT_PULLUP);
+  pinMode(CADENCE, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(SPEED), speedPulseInterrupt, FALLING); // The original signal from the trainer is either high or low, depending on the location of the speed sensor in the wheel. So we can react on the rising or falling of the signal.
   attachInterrupt(digitalPinToInterrupt(CADENCE), cadencePulseInterruptTimer, RISING); // The original signal from the trainer is high when no cadence measured. But in our hardware setup, the pulse goes through the inverting schmitt trigger!
   if (serial_debug) {
@@ -311,6 +315,18 @@ void loop() {
 
 #ifdef FAKE_DATA
   static unsigned long tick;
+  static unsigned long led_tick;
+  static bool toggle;
+
+  // refresh every 1sec
+  if (millis() - led_tick > 1000) {
+    led_tick = millis();
+    if (ble_connected == LOW) {
+      writeStatus(1024, 1024, toggle ? 0 : 1024);
+    }
+
+    toggle = !toggle;
+  }
 
   if (millis() - tick >= fake_duration) {
     tick = millis();
